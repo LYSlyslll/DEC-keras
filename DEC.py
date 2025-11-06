@@ -11,6 +11,7 @@ Author:
 """
 
 from time import time
+import json
 import numpy as np
 import keras.backend as K
 from keras.engine.topology import Layer, InputSpec
@@ -271,7 +272,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='train',
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--dataset', default='mnist',
-                        choices=['mnist', 'fmnist', 'usps', 'reuters10k', 'stl'])
+                        choices=['mnist', 'fmnist', 'usps', 'reuters10k', 'stl', 'jsonl'])
     parser.add_argument('--batch_size', default=256, type=int)
     parser.add_argument('--maxiter', default=2e4, type=int)
     parser.add_argument('--pretrain_epochs', default=None, type=int)
@@ -279,6 +280,12 @@ if __name__ == "__main__":
     parser.add_argument('--tol', default=0.001, type=float)
     parser.add_argument('--ae_weights', default=None)
     parser.add_argument('--save_dir', default='results')
+    parser.add_argument('--jsonl_path', default=None,
+                        help='Path to the JSONL file when using the jsonl dataset option.')
+    parser.add_argument('--expected_dim', default=768, type=int,
+                        help='Expected dimensionality of embeddings in the JSONL file.')
+    parser.add_argument('--n_clusters', default=None, type=int,
+                        help='Override the number of clusters when labels are unavailable.')
     args = parser.parse_args()
     print(args)
     import os
@@ -287,8 +294,15 @@ if __name__ == "__main__":
 
     # load dataset
     from datasets import load_data
-    x, y = load_data(args.dataset)
-    n_clusters = len(np.unique(y))
+    x, y, metadata = load_data(args.dataset, jsonl_path=args.jsonl_path,
+                               expected_dim=args.expected_dim)
+
+    if y is not None:
+        n_clusters = len(np.unique(y))
+    elif args.n_clusters is not None:
+        n_clusters = args.n_clusters
+    else:
+        raise ValueError('Number of clusters must be provided using --n_clusters when labels are not available.')
 
     init = 'glorot_uniform'
     pretrain_optimizer = 'adam'
@@ -332,5 +346,17 @@ if __name__ == "__main__":
     dec.compile(optimizer=SGD(0.01, 0.9), loss='kld')
     y_pred = dec.fit(x, y=y, tol=args.tol, maxiter=args.maxiter, batch_size=args.batch_size,
                      update_interval=update_interval, save_dir=args.save_dir)
-    print('acc:', metrics.acc(y, y_pred))
+    if y is not None:
+        print('acc:', metrics.acc(y, y_pred))
+
+    if metadata and metadata.get('idx') is not None:
+        assignment_path = os.path.join(args.save_dir, 'cluster_assignments.jsonl')
+        with open(assignment_path, 'w', encoding='utf-8') as fout:
+            error_types = metadata.get('error_type')
+            for i, cluster in enumerate(y_pred):
+                record = {'idx': metadata['idx'][i], 'cluster': int(cluster)}
+                if error_types is not None:
+                    record['error_type'] = error_types[i]
+                fout.write(json.dumps(record, ensure_ascii=False) + '\n')
+        print('Cluster assignments saved to %s' % assignment_path)
     print('clustering time: ', (time() - t0))

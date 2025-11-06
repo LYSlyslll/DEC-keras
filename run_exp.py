@@ -23,7 +23,7 @@ for db in ['usps', 'reuters10k', 'stl', 'mnist', 'fmnist']:
         # load dataset
     from datasets import load_data
 
-    x, y = load_data(db)
+    x, y, _ = load_data(db)
     n_clusters = len(np.unique(y))
 
     init = 'glorot_uniform'
