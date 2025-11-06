@@ -1,3 +1,6 @@
+import json
+import os
+
 import numpy as np
 
 
@@ -309,19 +312,77 @@ def load_stl(data_path='./data/stl'):
     return features, y
 
 
-def load_data(dataset_name):
+def load_jsonl_embeddings(jsonl_path, expected_dim=768):
+    if jsonl_path is None:
+        raise ValueError('jsonl_path must be provided for jsonl dataset loading.')
+
+    if not os.path.exists(jsonl_path):
+        raise IOError('JSONL file not found at %s' % jsonl_path)
+
+    embeddings = []
+    indices = []
+    error_types = []
+
+    with open(jsonl_path, 'r', encoding='utf-8') as f:
+        for line_number, line in enumerate(f, 1):
+            record = line.strip()
+            if not record:
+                continue
+            try:
+                payload = json.loads(record)
+            except json.JSONDecodeError as exc:
+                raise ValueError('Invalid JSON on line %d: %s' % (line_number, exc))
+
+            if 'embeddings' not in payload:
+                raise KeyError('Missing embeddings field on line %d' % line_number)
+            embedding = np.asarray(payload['embeddings'], dtype=np.float32)
+
+            if embedding.ndim != 1:
+                raise ValueError('Embeddings must be 1-D vectors. Line %d has shape %s' %
+                                 (line_number, embedding.shape))
+
+            if expected_dim is not None and embedding.size != expected_dim:
+                raise ValueError('Embedding size %d does not match expected_dim=%d on line %d' %
+                                 (embedding.size, expected_dim, line_number))
+
+            if 'idx' not in payload:
+                raise KeyError('Missing idx field on line %d' % line_number)
+
+            embeddings.append(embedding)
+            indices.append(payload['idx'])
+            error_types.append(payload.get('error_type'))
+
+    if not embeddings:
+        raise ValueError('No records were read from %s' % jsonl_path)
+
+    x = np.vstack(embeddings)
+    metadata = {'idx': indices}
+    if any(err is not None for err in error_types):
+        metadata['error_type'] = error_types
+
+    return x, None, metadata
+
+
+def load_data(dataset_name, **kwargs):
     if dataset_name == 'mnist':
-        return load_mnist()
+        x, y = load_mnist()
+        return x, y, None
     elif dataset_name == 'fmnist':
-        return load_fashion_mnist()
+        x, y = load_fashion_mnist()
+        return x, y, None
     elif dataset_name == 'usps':
-        return load_usps()
+        x, y = load_usps()
+        return x, y, None
     elif dataset_name == 'pendigits':
-        return load_pendigits()
+        x, y = load_pendigits()
+        return x, y, None
     elif dataset_name == 'reuters10k' or dataset_name == 'reuters':
-        return load_reuters()
+        x, y = load_reuters()
+        return x, y, None
     elif dataset_name == 'stl':
-        return load_stl()
+        x, y = load_stl()
+        return x, y, None
+    elif dataset_name == 'jsonl':
+        return load_jsonl_embeddings(kwargs.get('jsonl_path'), kwargs.get('expected_dim', 768))
     else:
-        print('Not defined for loading', dataset_name)
-        exit(0)
+        raise ValueError('Not defined for loading %s' % dataset_name)
